@@ -1,19 +1,24 @@
-#create twitter stream listner
+import time
+import json
+from ConfigParser import ConfigParser
+from threading import Thread
+from collections import Counter
+
 from tweepy.streaming import StreamListener
 from tweepy import OAuthHandler
 from tweepy import Stream
-import time
-import json
-import sys
-import csv
+
 from py2neo import Graph
 from neo4j import tweet_to_neo4j
 
-#create keys, ideally these keys should be stored remotely to avoid being made public on GitHub.
-consumer_key = 'hE2xXOptfraLvpgpmxcZMC4N5'
-consumer_secret = 'rTM7K7AKxiJekWQkwZmFoze03L22t5XFWW5Mr3nbW29XuMEVJZ'
-access_token_key = '75924798-4PeAF7UK7sSj7GFdg7gyGoRpNnw3l5eq69yKUzlu0'
-access_token_secret = 'SkZZSbUNawzAwsl2bthqbtuiNBG4X67TSiYEaE7phNmaW'
+
+#implement config parser to avoid showing secrets on github
+config = ConfigParser()
+config.read('config.ini')
+consumer_key = config.get("twitter", "consumer_key")
+consumer_secret = config.get("twitter", "consumer_secret")
+access_token_key = config.get("twitter", "access_token_key")
+access_token_secret = config.get("twitter", "access_token_secret")
 
 #authoize th twitter stream
 auth = OAuthHandler(consumer_key, consumer_secret)
@@ -27,32 +32,40 @@ class TwitterListener(StreamListener):
     """ A Handlers which sends tweets received by the string to the current RDD
     """
     def __init__(self):
-#         self.bucket = to_rdd
-        self.start_time = time.time()
-#         self.queue = rddQueue
-#         self.ssc = ssc
-    # def on_connect(self):
-    #     counter = 1
-    #     for i in range(0,2):
-    #         self.filename = "min%s.csv" % str(i)
-    #         time.sleep(10)
-    #         counter += 1
+      self.hashtag_bucket = []
 
-    def on_connect(self):
-        time.sleep(1)
+
+    # def on_connect(self):
+        # self.start_time = time.time()
+        # time.sleep(1)
 
     def on_data(self, data):
 
         try:
+
+            #parse only the data we need from the tweet
             data = ParseTweet(data)
+            # print data
+            #write the tweet a neo4j database for later analysis
             tweet_to_neo4j(data,graph)
-            print str(data)
-#
-            tweet_file = open('tweet_file.csv','a')
-            tweet_file.write(data)
-            tweet_file.write('\n')
-            tweet_file.close()
-            return True
+            #append hashtag to hashtag counter list
+            hashtags = data[4]
+            # add hashtags to big list
+            self.hashtag_bucket = self.hashtag_bucket + hashtags
+            #print running total of hashtags
+
+
+
+
+            #write counter() object to a new file every 5 minutes, reset hashtag bucket
+
+            # file_suffix += 1
+            # self.hashtag_bucket = []
+            # else:
+            #     return True
+
+
+
         except BaseException, e:
             print 'Failed on_data because ', str(e)
             time.sleep(2)
@@ -74,7 +87,11 @@ def ParseTweet(tweet):
     user_id = temp['user']['id']
     user_name = temp['user']['name']
     tweet_text = temp['text']
-    hash_tags = temp['entities']['hashtags']
+
+    hash_tags = []
+    for i in temp['entities']['hashtags']:
+        hash_tags.append(i['text'])
+
     symbols = temp['entities']['symbols']
 
     #if the tweet is retweeting something, also grab the id of the retweeted tweet.
@@ -91,10 +108,37 @@ def ParseTweet(tweet):
            symbols,
             RT_id]
 
+def write_counter(counter,file_suffix):
+    """writes a Counter() object to a file as a list of tuples"""
+    filename = 'counter%s.txt' % str(file_suffix)
+    for i in counter:
+                file = open(filename,'a')
+                file.write(str(i))
+                file.write('\n')
+                file.close()
+
+class BackgroundTimer(Thread):
+   def run(self):
+      self.file_suffix = 1
+      while 1:
+          time.sleep(300)
+
+          x = Counter(listener.hashtag_bucket).most_common(25)
+          write_counter(x,self.file_suffix)
+          print "writing counter"
+          self.file_suffix += 1
+          listener.hashtag_bucket = []
+
+
+
+
 if __name__ == '__main__':
-
-    l = TwitterListener()
-
-    stream = Stream(auth, l)
+    #create listener
+    listener = TwitterListener()
+    #start background timer
+    timer = BackgroundTimer()
+    timer.start()
+    #start stream
+    stream = Stream(auth, listener)
     stream.filter(track=['basketball'])
 

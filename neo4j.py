@@ -5,7 +5,7 @@ from py2neo import Graph
 graph = Graph("http://neo4j:Paran0id!@127.0.0.1:7474/db/data/")
 
 def tweet_to_neo4j(data,graph):
-    """give a mysql table, creates firm nodes"""
+    """given a tweet, creates tweet node, merges user node, and creates relationship between them"""
     tx = graph.cypher.begin()
     try:
         #if tweet user not yet in the system, create the user
@@ -16,8 +16,8 @@ def tweet_to_neo4j(data,graph):
                 node_create_date : {creation_date} }
             )
             RETURN n""",
-                  user_name= data[2],
-                  user_id=data[1],
+                  user_name = data[2],
+                  user_id = data[1],
                   hashtags = data[4],
                   creation_date=datetime.datetime.now())
 
